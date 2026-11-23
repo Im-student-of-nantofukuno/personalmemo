@@ -74,12 +74,14 @@ async def save_to_gas(message):
                         print("GASへの保存に成功しました。")
                         print(f"メモID: {result.get('memo_id')}")
                         print("--------------------------------")
-
+                    return result
+                
                 else:
                     print("GAS側でエラーが発生しました。")
                     print(f"HTTPステータス: {response.status}")
                     print(f"エラー種別: {result.get('error')}")
-
+                    return None
+            
     except Exception as error:
         print("--------------------------------")
         print("GASへの送信に失敗しました。")
