@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from dotenv import load_dotenv
 import os
 import aiohttp
@@ -30,8 +31,49 @@ OWNER_ID = int(OWNER_ID_TEXT)
 
 # Discord設定
 intents = discord.Intents.default()
-client = discord.Client(intents=intents)
 
+class MemoClient(discord.Client):
+    def __init__(self, *, intents):
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+
+client = MemoClient(intents=intents)
+tree = client.tree
+
+@tree.command(
+    name="ask",
+    description="保存したメモについて質問します"
+)
+@app_commands.describe(
+    question="質問したい内容"
+)
+async def ask(interaction: discord.Interaction, question: str):
+
+    # 自分以外のユーザーからの実行を拒否
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message(
+            "このコマンドは使用できません。"
+        )
+        return
+
+    # DM以外での実行を拒否
+    if interaction.guild is not None:
+        await interaction.response.send_message(
+            "このコマンドはDMで使用してください。"
+        )
+        return
+
+    print("--------------------------------")
+    print("askコマンドを受信しました。")
+    print(f"質問文字数: {len(question)}")
+    print("--------------------------------")
+
+    await interaction.response.send_message(
+        "質問を受け取りました。"
+    )
 
 @client.event
 async def on_ready():
@@ -39,8 +81,6 @@ async def on_ready():
     print(f"Botに接続しました: {client.user}")
     print(f"Bot ID: {client.user.id}")
     print("--------------------------------")
-
-
 
 async def save_to_gas(message):
     """GASへメッセージを送信する"""
