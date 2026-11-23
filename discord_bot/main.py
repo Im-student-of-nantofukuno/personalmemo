@@ -2,11 +2,6 @@ import discord
 from dotenv import load_dotenv
 import os
 import aiohttp
-
-import discord
-from dotenv import load_dotenv
-import os
-import aiohttp
 import asyncio
 
 from test_cloudflare_ai import process_date_extraction
@@ -240,7 +235,4 @@ async def on_message(message):
     # 3. 抽出結果をGASへ保存
     await save_dates_to_gas(memo_id, date_mentions)
 
-
-
-asyncio.run(test_get_memos())
 client.run(TOKEN)
