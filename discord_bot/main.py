@@ -39,14 +39,17 @@ async def on_ready():
     print("--------------------------------")
 
 
+
 async def save_to_gas(message):
     """GASへメッセージを送信する"""
 
     data = {
         "secret": GAS_API_SECRET,
+        "action": "save_memo",
         "content": message.content,
         "discord_message_id": str(message.id),
-        "source_user_id": str(message.author.id)
+        "source_user_id": str(message.author.id),
+        "created_at": message.created_at.isoformat()
     }
 
     try:
@@ -59,28 +62,28 @@ async def save_to_gas(message):
 
                 if result.get("success"):
                     if result.get("duplicated"):
-                        await message.reply("このメッセージは既に保存されています。")
+                        await message.reply(
+                            "このメッセージは既に保存されています。"
+                        )
                         print("既に保存済みのメッセージです。")
 
                     else:
-                        notification = result.get("notification")
-
-                        if notification:
-                            await message.reply(notification)
+                        await message.reply("メモを保存しました。")
 
                         print("--------------------------------")
                         print("GASへの保存に成功しました。")
                         print(f"メモID: {result.get('memo_id')}")
-                        print(f"保存行: {result.get('row')}")
                         print("--------------------------------")
+
                 else:
                     print("GAS側でエラーが発生しました。")
-                    print(result)
+                    print(f"HTTPステータス: {response.status}")
+                    print(f"エラー種別: {result.get('error')}")
 
     except Exception as error:
         print("--------------------------------")
         print("GASへの送信に失敗しました。")
-        print(f"エラー: {error}")
+        print(f"エラー種別: {type(error).__name__}")
         print("--------------------------------")
 
 
@@ -102,7 +105,6 @@ async def on_message(message):
     print("--------------------------------")
     print(f"送信者: {message.author}")
     print(f"送信者ID: {message.author.id}")
-    print(f"受信内容: {message.content}")
     print("--------------------------------")
 
     # GASへ保存
