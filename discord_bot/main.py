@@ -137,6 +137,53 @@ async def save_dates_to_gas(memo_id, date_mentions):
 
         return False
 
+
+async def get_memos_from_gas(query, limit=10):
+    """GASからキーワードに一致するメモを取得する"""
+
+    data = {
+        "secret": GAS_API_SECRET,
+        "action": "get_memos",
+        "query": query,
+        "limit": limit
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(GAS_URL, json=data) as response:
+
+                if response.status != 200:
+                    print("GAS memo search failed: HTTP error")
+                    return None
+
+                result = await response.json(content_type=None)
+
+                if not result.get("success"):
+                    print("GAS memo search failed: API error")
+                    return None
+
+                return result
+
+    except Exception as e:
+        # メモ本文や検索語はログに出さない
+        print(f"GAS memo search error: {type(e).__name__}")
+        return None
+
+
+async def test_get_memos():
+    result = await get_memos_from_gas("今日", limit=10)
+
+    if result is None:
+        print("検索テスト失敗")
+        return
+
+    print("検索テスト成功")
+    print(f"取得件数: {result.get('result_count')}")
+
+    for memo in result.get("results", []):
+        print(f"memo_id: {memo.get('memo_id')}")
+        print(f"category: {memo.get('category')}")
+
 @client.event
 async def on_message(message):
 
@@ -157,8 +204,43 @@ async def on_message(message):
     print(f"送信者ID: {message.author.id}")
     print("--------------------------------")
 
-    # GASへ保存
-    await save_to_gas(message)
+    
+    # 1. まずメモ本体をGASへ保存
+    save_result = await save_to_gas(message)
+
+    # 保存に失敗した場合は終了
+    if save_result is None:
+        return
+
+    # 重複メモなら日付抽出を行わない
+    if save_result.get("duplicated"):
+        return
+
+    # 保存されたメモのIDを取得
+    memo_id = save_result.get("memo_id")
+
+    if not memo_id:
+        print("メモIDを取得できなかったため、日付抽出を中止します。")
+        return
+
+    # 2. AIで日付情報を抽出
+    print("AIによる日付抽出を開始します。")
+
+    date_mentions = await asyncio.to_thread(
+        process_date_extraction,
+        message.content,
+        message.created_at
+    )
+
+    # 抽出に失敗した場合
+    if date_mentions is None:
+        print("日付抽出に失敗したため、日付情報は保存しません。")
+        return
+
+    # 3. 抽出結果をGASへ保存
+    await save_dates_to_gas(memo_id, date_mentions)
 
 
+
+asyncio.run(test_get_memos())
 client.run(TOKEN)
