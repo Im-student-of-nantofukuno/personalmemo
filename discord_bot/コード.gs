@@ -173,10 +173,167 @@ function saveMemo(data) {
  * 日付情報保存（後で実装）
  */
 function saveDates(data) {
-  return jsonResponse({
-    success: false,
-    error: "save_datesはまだ実装されていません。"
-  });
+  const memoId = data.memo_id;
+  const mentions = data.date_mentions;
+
+  // 入力チェック
+  if (!memoId || typeof memoId !== "string") {
+    return jsonResponse({
+      success: false,
+      error: "invalid_memo_id"
+    });
+  }
+
+  if (!Array.isArray(mentions)) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_date_mentions"
+    });
+  }
+
+  const validRoles = [
+    "plan", "deadline", "event", "historical", "other"
+  ];
+
+  const validKinds = ["date", "period"];
+
+  const validPrecisions = [
+    "day", "month", "year", "period", "unknown"
+  ];
+
+  const validStatuses = [
+    "certain", "approximate", "ambiguous", "unresolved"
+  ];
+
+  // 日付情報を検証
+  for (const item of mentions) {
+    if (
+      !item.expression ||
+      !validRoles.includes(item.role) ||
+      !validKinds.includes(item.kind) ||
+      !validPrecisions.includes(item.precision) ||
+      !validStatuses.includes(item.status)
+    ) {
+      return jsonResponse({
+        success: false,
+        error: "invalid_date_data"
+      });
+    }
+
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+    for (const date of [item.start_date, item.end_date]) {
+      if (date !== null && date !== undefined && date !== "") {
+        if (
+          typeof date !== "string" ||
+          !datePattern.test(date) ||
+          isNaN(Date.parse(date + "T00:00:00Z"))
+        ) {
+          return jsonResponse({
+            success: false,
+            error: "invalid_date_format"
+          });
+        }
+      }
+    }
+
+    if (
+      item.start_date &&
+      item.end_date &&
+      item.start_date > item.end_date
+    ) {
+      return jsonResponse({
+        success: false,
+        error: "invalid_date_range"
+      });
+    }
+  }
+
+  const properties = PropertiesService.getScriptProperties();
+  const spreadsheetId = properties.getProperty("SpreadsheetID");
+
+  if (!spreadsheetId) {
+    return jsonResponse({
+      success: false,
+      error: "spreadsheet_id_not_found"
+    });
+  }
+
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(10000);
+
+    const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = spreadsheet.getSheetByName("MemoDates");
+
+    if (!sheet) {
+      return jsonResponse({
+        success: false,
+        error: "memo_dates_sheet_not_found"
+      });
+    }
+
+    const lastRow = sheet.getLastRow();
+
+    // 既存データを取得
+    let existingRows = [];
+
+    if (lastRow >= 2) {
+      existingRows = sheet
+        .getRange(2, 1, lastRow - 1, 9)
+        .getValues();
+    }
+
+    // 対象メモ以外のデータを残す
+    const remainingRows = existingRows.filter(
+      row => row[0] !== memoId
+    );
+
+    // 新しい日付情報を作成
+    const newRows = mentions.map(item => [
+      memoId,
+      item.expression,
+      item.role,
+      item.kind,
+      item.start_date || "",
+      item.end_date || "",
+      item.precision,
+      item.status,
+      item.note || ""
+    ]);
+
+    const allRows = remainingRows.concat(newRows);
+
+    // データ部分を更新
+    if (lastRow >= 2) {
+      sheet.getRange(2, 1, lastRow - 1, 9).clearContent();
+    }
+
+    if (allRows.length > 0) {
+      sheet.getRange(2, 1, allRows.length, 9).setValues(allRows);
+    }
+
+    return jsonResponse({
+      success: true,
+      memo_id: memoId,
+      saved_count: newRows.length,
+      status: "saved"
+    });
+
+  } catch (error) {
+    console.error("saveDates error: " + error);
+
+    return jsonResponse({
+      success: false,
+      error: "save_dates_failed"
+    });
+
+  } finally {
+    if (lock.hasLock()) {
+      lock.releaseLock();
+    }
+  }
 }
 
 
@@ -198,4 +355,137 @@ function jsonResponse(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/**
+ * save_memoの入力検証テスト
+ * Spreadsheetには書き込まない
+ */
+function testSaveMemoValidation() {
+
+  const validData = {
+    action: "save_memo",
+    content: "テスト用メモ",
+    discord_message_id: "test_message_001",
+    source_user_id: "test_user_001",
+    created_at: "2026-11-23T10:20:00+09:00"
+  };
+
+  const invalidData = {
+    action: "save_memo",
+    content: "",
+    discord_message_id: "test_message_002",
+    source_user_id: "test_user_001",
+    created_at: "2026-11-23T10:20:00+09:00"
+  };
+
+  // 正常データの検証
+  const validDate = new Date(validData.created_at);
+
+  console.log(
+    "正常データ:",
+    !isNaN(validDate.getTime()) &&
+    validData.content.trim() !== ""
+  );
+
+  // 不正データの検証
+  const invalidDate = new Date(invalidData.created_at);
+
+  console.log(
+    "空のメモ:",
+    !invalidData.content.trim()
+  );
+
+  console.log(
+    "日時形式:",
+    !isNaN(invalidDate.getTime())
+  );
+}
+
+/**
+ * saveMemoの保存テスト
+ */
+function testSaveMemo() {
+
+  const testData = {
+    content: "保存テスト用メモ",
+    discord_message_id: "test_saveMemo_001",
+    source_user_id: "test_user_001",
+    created_at: "2026-11-23T21:00:00+09:00"
+  };
+
+  const result = saveMemo(testData);
+
+  console.log(result.getContent());
+}
+
+
+function testSaveDates() {
+  const memoId = "test_dates_001";
+
+  // テスト1：2件保存
+  const firstResult = JSON.parse(
+    saveDates({
+      memo_id: memoId,
+      date_mentions: [
+        {
+          expression: "3日後",
+          role: "plan",
+          kind: "date",
+          start_date: "2026-11-26",
+          end_date: "2026-11-26",
+          precision: "day",
+          status: "certain",
+          note: "3日後の予定"
+        },
+        {
+          expression: "来週",
+          role: "event",
+          kind: "period",
+          start_date: "2026-11-30",
+          end_date: "2026-12-06",
+          precision: "period",
+          status: "certain",
+          note: "来週の期間"
+        }
+      ]
+    }).getContent()
+  );
+
+  console.log("テスト1：2件保存");
+  console.log(JSON.stringify(firstResult));
+
+  // テスト2：1件に置き換え
+  const secondResult = JSON.parse(
+    saveDates({
+      memo_id: memoId,
+      date_mentions: [
+        {
+          expression: "明日",
+          role: "plan",
+          kind: "date",
+          start_date: "2026-11-24",
+          end_date: "2026-11-24",
+          precision: "day",
+          status: "certain",
+          note: "明日の予定"
+        }
+      ]
+    }).getContent()
+  );
+
+  console.log("テスト2：置き換え");
+  console.log(JSON.stringify(secondResult));
+
+  // テスト3：0件に置き換え
+  const thirdResult = JSON.parse(
+    saveDates({
+      memo_id: memoId,
+      date_mentions: []
+    }).getContent()
+  );
+
+  console.log("テスト3：0件に置き換え");
+  console.log(JSON.stringify(thirdResult));
 }
