@@ -71,8 +71,35 @@ async def ask(interaction: discord.Interaction, question: str):
     print(f"質問文字数: {len(question)}")
     print("--------------------------------")
 
-    await interaction.response.send_message(
-        "質問を受け取りました。"
+    # GASへの検索には時間がかかる可能性があるため、先に応答を保留
+    await interaction.response.defer(ephemeral=True)
+
+    # 質問文を検索語としてGASへ送信
+    result = await get_memos_from_gas(question, limit=10)
+
+    if result is None:
+        await interaction.followup.send(
+            "メモの検索に失敗しました。"
+        )
+        return
+
+    memos = result.get("results", [])
+
+    if not memos:
+        await interaction.followup.send(
+            "該当するメモは見つかりませんでした。"
+        )
+        return
+
+    # 検索結果の確認
+    memo_ids = [
+        memo.get("memo_id")
+        for memo in memos
+    ]
+
+    await interaction.followup.send(
+        f"メモを {len(memos)} 件取得しました。\n"
+        f"参照ID:\n" + "\n".join(memo_ids)
     )
 
 @client.event
