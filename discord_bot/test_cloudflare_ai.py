@@ -524,60 +524,65 @@ def process_date_extraction(text, message_datetime):
 # テスト実行
 # ==================================================
 
+
 def main():
 
-    # Discordから受け取った日時を想定
     test_datetime = datetime(
         2026, 11, 23, 10, 20,
         tzinfo=ZoneInfo("Asia/Tokyo")
     )
 
-    test_text = "3日後に確認する"
+    # ----------------------------------------------
+    # テスト1：日付情報がある文章
+    # ----------------------------------------------
 
-    result = extract_dates(
-        test_text,
+    print("\n========== テスト1 ==========")
+
+    result = process_date_extraction(
+        "3日後に確認する",
         test_datetime
     )
 
-    print("\n========== AIの応答 ==========")
+    print("結果:", result)
 
-    if result is not None:
+    # ----------------------------------------------
+    # テスト2：日付情報がない文章
+    # ----------------------------------------------
 
-        if validate_date_result(result):
-            print("検証成功！")
-        else:
-            print("検証失敗！")
+    print("\n========== テスト2 ==========")
 
-        print(json.dumps(
-            result,
-            ensure_ascii=False,
-            indent=2
-        ))
-    else:
-        print("日付抽出に失敗しました。")
+    result = process_date_extraction(
+        "今日は数学の勉強をした",
+        test_datetime
+    )
 
-    # 検証関数の異常系テスト
-    test_result = {
+    print("結果:", result)
+
+    # ----------------------------------------------
+    # テスト3：不正な日付情報
+    # ----------------------------------------------
+
+    print("\n========== テスト3 ==========")
+
+    invalid_result = {
         "date_mentions": [
             {
-                "expression": "3日後",
+                "expression": "2月30日",
                 "role": "plan",
                 "kind": "date",
                 "start_date": "2026-02-30",
                 "end_date": "2026-02-30",
                 "precision": "day",
                 "status": "certain",
-                "note": "テスト用の不正な日付"
+                "note": "テスト用"
             }
         ]
     }
 
-    print("\n========== 検証テスト ==========")
-
-    if validate_date_result(test_result):
+    if validate_date_result(invalid_result):
         print("検証成功")
     else:
-        print("不正なデータを検出しました")
+        print("日付抽出失敗")
 
 
 if __name__ == "__main__":
