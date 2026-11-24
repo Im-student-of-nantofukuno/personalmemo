@@ -288,6 +288,37 @@ async def create_and_save_embedding(memo_id, content):
         embedding
     )
 
+async def get_memo_vectors_from_gas():
+    """GASから有効なメモとEmbeddingを取得する"""
+
+    data = {
+        "secret": GAS_API_SECRET,
+        "action": "get_memo_vectors"
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(GAS_URL, json=data) as response:
+
+                if response.status != 200:
+                    print("Embedding取得失敗: HTTPエラー")
+                    return None
+
+                result = await response.json(content_type=None)
+
+                if not result.get("success"):
+                    print("Embedding取得失敗: GAS側のエラー")
+                    return None
+
+                return result.get("results", [])
+
+    except Exception as error:
+        print("Embedding取得時に通信エラーが発生しました。")
+        print(f"エラー種別: {type(error).__name__}")
+        return None
+
 async def get_memos_from_gas(query, limit=10):
     """GASからキーワードに一致するメモを取得する"""
 
@@ -318,7 +349,6 @@ async def get_memos_from_gas(query, limit=10):
         # メモ本文や検索語はログに出さない
         print(f"GAS memo search error: {type(e).__name__}")
         return None
-
 
 async def test_get_memos():
     result = await get_memos_from_gas("今日", limit=10)
@@ -385,7 +415,7 @@ async def on_message(message):
         print(f"エラー種別: {type(error).__name__}")
 
     # Embeddingの成否にかかわらず、日付抽出を続行
-    
+
     # 2. AIで日付情報を抽出
     print("AIによる日付抽出を開始します。")
 
