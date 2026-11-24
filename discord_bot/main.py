@@ -7,7 +7,10 @@ import asyncio
 
 from test_cloudflare_ai import (
     process_date_extraction,
-    generate_memo_answer
+    generate_memo_answer,
+    generate_embedding,
+    EMBEDDING_MODEL_ID,
+    EMBEDDING_DIMENSIONS
 )
 # 環境変数を読み込む
 load_dotenv()
@@ -230,6 +233,60 @@ async def save_dates_to_gas(memo_id, date_mentions):
 
         return False
 
+async def save_embedding_to_gas(memo_id, embedding):
+    """生成したEmbeddingをGASへ保存する"""
+
+    data = {
+        "secret": GAS_API_SECRET,
+        "action": "save_embedding",
+        "memo_id": memo_id,
+        "embedding": embedding,
+        "model_id": EMBEDDING_MODEL_ID,
+        "dimensions": EMBEDDING_DIMENSIONS
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(GAS_URL, json=data) as response:
+
+                result = await response.json(content_type=None)
+
+                if response.status == 200 and result.get("success"):
+                    print("Embeddingの保存に成功しました。")
+                    return True
+
+                print("Embeddingの保存に失敗しました。")
+                print(f"HTTPステータス: {response.status}")
+                print(f"エラー種別: {result.get('error')}")
+                return False
+
+    except Exception as error:
+        print("Embedding保存時に通信エラーが発生しました。")
+        print(f"エラー種別: {type(error).__name__}")
+        return False
+
+
+async def create_and_save_embedding(memo_id, content):
+    """メモからEmbeddingを生成してGASへ保存する"""
+
+    print("Embedding生成を開始します。")
+
+    embedding = await asyncio.to_thread(
+        generate_embedding,
+        content,
+        input_type="document"
+    )
+
+    if embedding is None:
+        print("Embeddingの生成に失敗しました。")
+        return False
+
+    return await save_embedding_to_gas(
+        memo_id,
+        embedding
+    )
 
 async def get_memos_from_gas(query, limit=10):
     """GASからキーワードに一致するメモを取得する"""
