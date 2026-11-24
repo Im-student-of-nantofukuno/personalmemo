@@ -49,7 +49,10 @@ function doPost(e) {
 
       case "save_dates":
         return saveDates(data);
-
+      
+      case "save_embedding":
+        return saveEmbedding(data);
+      
       case "get_memos":
         return getMemos(data);
 
@@ -58,6 +61,7 @@ function doPost(e) {
           success: false,
           error: "不明なactionです。"
         });
+
     }
 
   } catch (error) {
@@ -70,6 +74,172 @@ function doPost(e) {
   }
 }
 
+
+/**
+ * Embeddingベクトル保存
+ */
+function saveEmbedding(data) {
+
+  const memoId = data.memo_id;
+  const embedding = data.embedding;
+  const modelId = data.model_id;
+  const dimensions = Number(data.dimensions);
+
+  // 入力チェック
+  if (
+    typeof memoId !== "string" ||
+    !memoId.trim()
+  ) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_memo_id"
+    });
+  }
+
+  if (
+    !Array.isArray(embedding) ||
+    dimensions !== 768 ||
+    embedding.length !== dimensions
+  ) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_embedding_dimensions"
+    });
+  }
+
+  if (
+    !embedding.every(value =>
+      typeof value === "number" &&
+      Number.isFinite(value)
+    )
+  ) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_embedding_values"
+    });
+  }
+
+  if (
+    typeof modelId !== "string" ||
+    !modelId.trim()
+  ) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_model_id"
+    });
+  }
+
+  const properties = PropertiesService.getScriptProperties();
+  const spreadsheetId = properties.getProperty("SpreadsheetID");
+
+  if (!spreadsheetId) {
+    return jsonResponse({
+      success: false,
+      error: "spreadsheet_id_not_found"
+    });
+  }
+
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(10000);
+
+    const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+
+    const memoSheet = spreadsheet.getSheetByName("Memos");
+    const vectorSheet = spreadsheet.getSheetByName("MemoVectors");
+
+    if (!memoSheet || !vectorSheet) {
+      return jsonResponse({
+        success: false,
+        error: "required_sheet_not_found"
+      });
+    }
+
+    // 元のメモが存在するか確認
+    const memoLastRow = memoSheet.getLastRow();
+
+    if (memoLastRow < 2) {
+      return jsonResponse({
+        success: false,
+        error: "memo_not_found"
+      });
+    }
+
+    const memoIds = memoSheet
+      .getRange(2, 1, memoLastRow - 1, 1)
+      .getValues()
+      .flat()
+      .map(String);
+
+    if (!memoIds.includes(memoId)) {
+      return jsonResponse({
+        success: false,
+        error: "memo_not_found"
+      });
+    }
+
+    // 保存するデータ
+    const now = new Date();
+
+    const rowData = [
+      memoId,
+      JSON.stringify(embedding),
+      modelId,
+      dimensions,
+      now
+    ];
+
+    // 既存のベクトルを確認
+    const lastRow = vectorSheet.getLastRow();
+
+    let targetRow = -1;
+
+    if (lastRow >= 2) {
+      const existingIds = vectorSheet
+        .getRange(2, 1, lastRow - 1, 1)
+        .getValues()
+        .flat()
+        .map(String);
+
+      const index = existingIds.indexOf(memoId);
+
+      if (index !== -1) {
+        targetRow = index + 2;
+      }
+    }
+
+    // 既存データがあれば更新、なければ追加
+    if (targetRow !== -1) {
+      vectorSheet
+        .getRange(targetRow, 1, 1, 5)
+        .setValues([rowData]);
+    } else {
+      vectorSheet
+        .getRange(lastRow + 1, 1, 1, 5)
+        .setValues([rowData]);
+    }
+
+    return jsonResponse({
+      success: true,
+      memo_id: memoId,
+      status: targetRow !== -1 ? "updated" : "saved"
+    });
+
+  } catch (error) {
+    console.error("saveEmbedding error: " + error);
+
+    return jsonResponse({
+      success: false,
+      error: "save_embedding_failed"
+    });
+
+  } finally {
+    if (lock.hasLock()) {
+      lock.releaseLock();
+    }
+  }
+}
 
 /**
  * メモ保存
