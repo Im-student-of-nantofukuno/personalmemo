@@ -55,6 +55,8 @@ function doPost(e) {
       
       case "get_memos":
         return getMemos(data);
+      case "get_memo_vectors":
+        return getMemoVectors(data);
 
       default:
         return jsonResponse({
@@ -766,4 +768,144 @@ function testGetMemos() {
   });
 
   console.log(result.getContent());
+}
+
+
+/**
+ * 保存済みEmbeddingと対応するメモを取得
+ */
+function getMemoVectors(data) {
+
+  const properties = PropertiesService.getScriptProperties();
+  const spreadsheetId = properties.getProperty("SpreadsheetID");
+
+  if (!spreadsheetId) {
+    return jsonResponse({
+      success: false,
+      error: "spreadsheet_id_not_found"
+    });
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+
+  const memoSheet = spreadsheet.getSheetByName("Memos");
+  const vectorSheet = spreadsheet.getSheetByName("MemoVectors");
+
+  if (!memoSheet || !vectorSheet) {
+    return jsonResponse({
+      success: false,
+      error: "required_sheet_not_found"
+    });
+  }
+
+  const memoLastRow = memoSheet.getLastRow();
+  const vectorLastRow = vectorSheet.getLastRow();
+
+  if (memoLastRow < 2 || vectorLastRow < 2) {
+    return jsonResponse({
+      success: true,
+      result_count: 0,
+      results: []
+    });
+  }
+
+  // ------------------------------------------
+  // 1. 有効なメモを取得
+  // ------------------------------------------
+
+  const memoRows = memoSheet
+    .getRange(2, 1, memoLastRow - 1, 9)
+    .getValues();
+
+  const memoMap = new Map();
+
+  for (const row of memoRows) {
+
+    const memoId = String(row[0]);
+    const content = String(row[1] || "");
+    const status = String(row[8] || "");
+
+    if (status !== "ACTIVE") {
+      continue;
+    }
+
+    memoMap.set(memoId, {
+      content: content,
+      created_at: row[3] instanceof Date
+        ? Utilities.formatDate(
+            row[3],
+            "Asia/Tokyo",
+            "yyyy-MM-dd'T'HH:mm:ss"
+          ) + "+09:00"
+        : String(row[3])
+    });
+  }
+
+  // ------------------------------------------
+  // 2. Embeddingを取得
+  // ------------------------------------------
+
+  const vectorRows = vectorSheet
+    .getRange(2, 1, vectorLastRow - 1, 5)
+    .getValues();
+
+  const results = [];
+
+  for (const row of vectorRows) {
+
+    const memoId = String(row[0]);
+    const embeddingText = row[1];
+    const modelId = String(row[2]);
+    const dimensions = Number(row[3]);
+
+    // 対応する有効なメモがない場合は除外
+    if (!memoMap.has(memoId)) {
+      continue;
+    }
+
+    // モデルと次元数を確認
+    if (
+      modelId !== "@cf/google/embeddinggemma-2" ||
+      dimensions !== 768
+    ) {
+      continue;
+    }
+
+    // JSON文字列から配列に戻す
+    let embedding;
+
+    try {
+      embedding = JSON.parse(embeddingText);
+    } catch (error) {
+      continue;
+    }
+
+    if (
+      !Array.isArray(embedding) ||
+      embedding.length !== dimensions ||
+      !embedding.every(value =>
+        typeof value === "number" &&
+        Number.isFinite(value)
+      )
+    ) {
+      continue;
+    }
+
+    const memo = memoMap.get(memoId);
+
+    results.push({
+      memo_id: memoId,
+      content: memo.content,
+      created_at: memo.created_at,
+      embedding: embedding,
+      model_id: modelId,
+      dimensions: dimensions
+    });
+  }
+
+  return jsonResponse({
+    success: true,
+    result_count: results.length,
+    results: results
+  });
 }
