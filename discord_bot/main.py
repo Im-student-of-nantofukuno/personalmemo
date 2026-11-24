@@ -5,7 +5,10 @@ import os
 import aiohttp
 import asyncio
 
-from test_cloudflare_ai import process_date_extraction
+from test_cloudflare_ai import (
+    process_date_extraction,
+    generate_memo_answer
+)
 # 環境変数を読み込む
 load_dotenv()
 
@@ -91,16 +94,44 @@ async def ask(interaction: discord.Interaction, question: str):
         )
         return
 
-    # 検索結果の確認
-    memo_ids = [
-        memo.get("memo_id")
-        for memo in memos
-    ]
+    # 取得したメモをAIに渡して回答を生成
+    print("AIによる回答生成を開始します。")
 
-    await interaction.followup.send(
-        f"メモを {len(memos)} 件取得しました。\n"
-        f"参照ID:\n" + "\n".join(memo_ids)
+    answer_result = await asyncio.to_thread(
+        generate_memo_answer,
+        question,
+        memos
     )
+
+    # AIの回答生成に失敗した場合
+    if answer_result is None:
+        await interaction.followup.send(
+            f"メモを {len(memos)} 件取得しましたが、"
+            "回答の生成に失敗しました。"
+        )
+        return
+
+    # 回答を取り出す
+    memo_answer = answer_result.get("memo_answer", "")
+    general_knowledge = answer_result.get("general_knowledge", "")
+    used_memo_ids = answer_result.get("used_memo_ids", [])
+
+    # Discordへ回答を送信
+    response_text = f"**メモに基づく回答**\n{memo_answer}"
+
+    if general_knowledge:
+        response_text += (
+            f"\n\n**一般知識による補足**\n"
+            f"{general_knowledge}"
+        )
+
+    if used_memo_ids:
+        response_text += (
+            "\n\n**参照したメモID**\n"
+            + "\n".join(used_memo_ids)
+        )
+
+    await interaction.followup.send(response_text)
 
 @client.event
 async def on_ready():
