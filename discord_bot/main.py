@@ -1,3 +1,4 @@
+import math
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
@@ -318,6 +319,80 @@ async def get_memo_vectors_from_gas():
         print("Embedding取得時に通信エラーが発生しました。")
         print(f"エラー種別: {type(error).__name__}")
         return None
+
+def cosine_similarity(vector_a, vector_b):
+    """2つのベクトルのコサイン類似度を計算する"""
+
+    if len(vector_a) != len(vector_b):
+        return None
+
+    dot_product = sum(
+        a * b for a, b in zip(vector_a, vector_b)
+    )
+
+    norm_a = math.sqrt(sum(a * a for a in vector_a))
+    norm_b = math.sqrt(sum(b * b for b in vector_b))
+
+    if norm_a == 0 or norm_b == 0:
+        return None
+
+    return dot_product / (norm_a * norm_b)
+
+async def vector_search(question, top_k=3):
+    """質問文に近いメモをベクトル検索する"""
+
+    print("ベクトル検索を開始します。")
+
+    # 1. 質問文をEmbeddingに変換
+    query_embedding = await asyncio.to_thread(
+        generate_embedding,
+        question,
+        input_type="query"
+    )
+
+    if query_embedding is None:
+        print("質問文のEmbedding生成に失敗しました。")
+        return None
+
+    # 2. GASから保存済みメモを取得
+    memos = await get_memo_vectors_from_gas()
+
+    if memos is None:
+        print("メモのEmbedding取得に失敗しました。")
+        return None
+
+    # 3. 類似度を計算
+    results = []
+
+    for memo in memos:
+        similarity = cosine_similarity(
+            query_embedding,
+            memo.get("embedding", [])
+        )
+
+        if similarity is None:
+            continue
+
+        results.append({
+            "memo_id": memo.get("memo_id"),
+            "content": memo.get("content"),
+            "created_at": memo.get("created_at"),
+            "score": similarity
+        })
+
+    # 4. 類似度の高い順に並べる
+    results.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    # 5. 上位のメモだけ返す
+    selected_results = results[:top_k]
+
+    print(f"検索対象メモ数: {len(memos)}")
+    print(f"検索結果数: {len(selected_results)}")
+
+    return selected_results
 
 async def get_memos_from_gas(query, limit=10):
     """GASからキーワードに一致するメモを取得する"""
