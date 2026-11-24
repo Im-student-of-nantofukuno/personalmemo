@@ -81,16 +81,14 @@ async def ask(interaction: discord.Interaction, question: str):
     # GASへの検索には時間がかかる可能性があるため、先に応答を保留
     await interaction.response.defer(ephemeral=True)
 
-    # 質問文を検索語としてGASへ送信
-    result = await get_memos_from_gas(question, limit=10)
+    # 質問文を使ってベクトル検索
+    memos = await vector_search(question, top_k=3)
 
-    if result is None:
+    if memos is None:
         await interaction.followup.send(
             "メモの検索に失敗しました。"
         )
         return
-
-    memos = result.get("results", [])
 
     if not memos:
         await interaction.followup.send(
