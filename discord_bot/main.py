@@ -372,7 +372,20 @@ async def on_message(message):
     if not memo_id:
         print("メモIDを取得できなかったため、日付抽出を中止します。")
         return
+        # 2. メモのEmbeddingを生成して保存
+    print("Embeddingの生成・保存を開始します。")
 
+    try:
+        await create_and_save_embedding(
+            memo_id,
+            message.content
+        )
+    except Exception as error:
+        print("Embedding処理中に予期しないエラーが発生しました。")
+        print(f"エラー種別: {type(error).__name__}")
+
+    # Embeddingの成否にかかわらず、日付抽出を続行
+    
     # 2. AIで日付情報を抽出
     print("AIによる日付抽出を開始します。")
 
