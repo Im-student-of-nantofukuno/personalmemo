@@ -1,4 +1,3 @@
-
 import json
 import os
 from pathlib import Path
@@ -26,6 +25,113 @@ URL = (
     f"{ACCOUNT_ID}/ai/run/{MODEL_ID}"
 )
 
+
+# ==================================================
+# Embedding設定
+# ==================================================
+
+EMBEDDING_MODEL_ID = "@cf/google/embeddinggemma-2"
+
+EMBEDDING_DIMENSIONS = 768
+
+EMBEDDING_URL = (
+    f"https://api.cloudflare.com/client/v4/accounts/"
+    f"{ACCOUNT_ID}/ai/run/{EMBEDDING_MODEL_ID}"
+)
+
+
+# ==================================================
+# Embedding生成
+# ==================================================
+
+def generate_embedding(text, input_type="document"):
+    """
+    文章をベクトルに変換する。
+
+    input_type:
+        document: 保存するメモ
+        query: 検索する質問
+
+    成功時：ベクトル（768個の数値）
+    失敗時：None
+    """
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    if not ACCOUNT_ID or not API_TOKEN:
+        print("Cloudflareの設定を確認してください。")
+        return None
+
+    # 入力の種類に応じた接頭辞
+    if input_type == "document":
+        input_text = f"title: none | text: {text}"
+
+    elif input_type == "query":
+        input_text = f"task: search result | query: {text}"
+
+    else:
+        print("不正なinput_typeです。")
+        return None
+
+    request_body = {
+        "input": [input_text],
+        "dimensions": EMBEDDING_DIMENSIONS
+    }
+
+    data = json.dumps(request_body).encode("utf-8")
+
+    request = Request(
+        EMBEDDING_URL,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {API_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
+    try:
+        with urlopen(request, timeout=90) as response:
+            result = json.loads(
+                response.read().decode("utf-8")
+            )
+
+        if not result.get("success"):
+            print("Embedding生成に失敗しました。")
+            return None
+
+        embedding = result["result"]["data"][0]["embedding"]
+
+        if not isinstance(embedding, list):
+            return None
+
+        if len(embedding) != EMBEDDING_DIMENSIONS:
+            print("ベクトルの次元数が一致しません。")
+            return None
+
+        if not all(
+            isinstance(x, (int, float)) and not isinstance(x, bool)
+            for x in embedding
+        ):
+            print("ベクトルに不正な値が含まれています。")
+            return None
+
+        return embedding
+
+    except HTTPError as e:
+        print(f"Embedding HTTPエラー: {e.code}")
+
+    except URLError:
+        print("Embedding生成時に通信エラーが発生しました。")
+
+    except (KeyError, IndexError, ValueError, TypeError):
+        print("Embeddingの応答形式が不正です。")
+
+    except Exception as e:
+        print(f"Embedding生成エラー: {type(e).__name__}")
+
+    return None
 
 # ==================================================
 # 日付抽出用 JSON Schema
