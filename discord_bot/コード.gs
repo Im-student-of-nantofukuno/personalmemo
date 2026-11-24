@@ -336,16 +336,111 @@ function saveDates(data) {
   }
 }
 
-
 /**
- * メモ取得（後で実装）
+ * メモ取得
  */
 function getMemos(data) {
+  const query = data.query;
+
+  // 検索語の検証
+  if (typeof query !== "string" || !query.trim()) {
+    return jsonResponse({
+      success: false,
+      error: "invalid_query"
+    });
+  }
+
+  // 取得件数の設定
+  let limit = Number(data.limit);
+
+  if (!Number.isInteger(limit) || limit <= 0) {
+    limit = 10;
+  }
+
+  limit = Math.min(limit, 20);
+
+  const properties = PropertiesService.getScriptProperties();
+  const spreadsheetId = properties.getProperty("SpreadsheetID");
+
+  if (!spreadsheetId) {
+    return jsonResponse({
+      success: false,
+      error: "spreadsheet_id_not_found"
+    });
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = spreadsheet.getSheetByName("Memos");
+
+  if (!sheet) {
+    return jsonResponse({
+      success: false,
+      error: "memos_sheet_not_found"
+    });
+  }
+
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) {
+    return jsonResponse({
+      success: true,
+      result_count: 0,
+      results: []
+    });
+  }
+
+  // メモ一覧を取得
+  const rows = sheet
+    .getRange(2, 1, lastRow - 1, 9)
+    .getValues();
+
+  const normalizedQuery = query.trim().toLowerCase();
+
+  // 検索・整形
+  const results = rows
+    .filter(row => {
+      const content = String(row[1] || "").toLowerCase();
+      const status = String(row[8] || "");
+
+      return (
+        status === "ACTIVE" &&
+        content.includes(normalizedQuery)
+      );
+    })
+    .sort((a, b) => {
+      return new Date(b[3]).getTime() -
+             new Date(a[3]).getTime();
+    })
+    .slice(0, limit)
+    .map(row => ({
+      memo_id: String(row[0]),
+      content: String(row[1]),
+      category: String(row[2]),
+      created_at: row[3] instanceof Date
+        ? Utilities.formatDate(
+            row[3],
+            "Asia/Tokyo",
+            "yyyy-MM-dd'T'HH:mm:ss"
+          ) + "+09:00"
+        : String(row[3]),
+      updated_at: row[4] instanceof Date
+        ? Utilities.formatDate(
+            row[4],
+            "Asia/Tokyo",
+            "yyyy-MM-dd'T'HH:mm:ss"
+          ) + "+09:00"
+        : String(row[4]),
+      importance: row[7] === "" ? null : row[7],
+      status: String(row[8])
+    }));
+
   return jsonResponse({
-    success: false,
-    error: "get_memosはまだ実装されていません。"
+    success: true,
+    result_count: results.length,
+    results: results
   });
 }
+
 
 
 /**
@@ -488,4 +583,17 @@ function testSaveDates() {
 
   console.log("テスト3：0件に置き換え");
   console.log(JSON.stringify(thirdResult));
+}
+
+
+/**
+ * getMemosの検索テスト
+ */
+function testGetMemos() {
+  const result = getMemos({
+    query: "今日",
+    limit: 10
+  });
+
+  console.log(result.getContent());
 }
