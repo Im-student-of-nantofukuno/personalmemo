@@ -13,7 +13,8 @@ from test_cloudflare_ai import (
     generate_memo_answer,
     generate_embedding,
     EMBEDDING_MODEL_ID,
-    EMBEDDING_DIMENSIONS
+    EMBEDDING_DIMENSIONS,
+    get_tracked_neurons_today
 )
 # 環境変数を読み込む
 load_dotenv()
@@ -129,7 +130,10 @@ async def add_usage_footer(message_text):
             if groups else 0
         )
 
-        used = int(round(float(used or 0)))
+        # Analyticsの集計遅延を補うため、Bot自身が応答から記録した累計と比較する。
+        analytics_used = int(round(float(used or 0)))
+        bot_tracked_used = get_tracked_neurons_today()
+        used = max(analytics_used, bot_tracked_used)
         remaining = max(0, 10000 - used)
 
         if used <= 10000:
@@ -146,7 +150,7 @@ async def add_usage_footer(message_text):
         footer = (
             "\n\n**Cloudflare Workers AI（本日・UTC）**\n"
             f"{usage_text}\n"
-            "※ Cloudflare Analyticsによる推定値です。"
+            "※ Analytics実測値と、Botの応答から記録したNeurons累計を反映しています。"
         )
         return message_text + footer
 
