@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import aiohttp
 import asyncio
+from datetime import datetime, timezone
 
 from test_cloudflare_ai import (
     process_date_extraction,
@@ -35,6 +36,109 @@ if not GAS_API_SECRET:
     raise RuntimeError("GAS_API_SECRET が設定されていません。")
 
 OWNER_ID = int(OWNER_ID_TEXT)
+
+# Cloudflare Analytics APIでも同じAPIトークンを使用する
+# トークンには「Account Analytics: Read」権限が必要
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
+
+async def add_usage_footer(message_text):
+    """Cloudflare Workers AIの当日使用量と無料枠残量を返信に付加する。
+
+    Analytics APIの値は推定値。日付の区切りはUTC 00:00。
+    """
+    if not CLOUDFLARE_API_TOKEN:
+        return message_text + "\n\n【Workers AI 使用量】取得不可（APIトークン未設定）"
+
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    query = """
+    query($accountTag: String!, $day: Date!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          aiInferenceAdaptiveGroups(
+            limit: 1
+            filter: { date: $day }
+          ) {
+            sum {
+              totalNeurons
+            }
+          }
+        }
+      }
+    }
+    """
+
+    payload = {
+        "query": query,
+        "variables": {
+            "accountTag": os.getenv("CLOUDFLARE_ACCOUNT_ID"),
+            "day": today_utc
+        }
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://api.cloudflare.com/client/v4/graphql",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+                    "Content-Type": "application/json"
+                }
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"HTTP {response.status}")
+
+                result = await response.json(content_type=None)
+
+        if result.get("errors"):
+            raise RuntimeError("Analytics API returned errors")
+
+        accounts = (
+            result.get("data", {})
+            .get("viewer", {})
+            .get("accounts", [])
+        )
+
+        groups = (
+            accounts[0].get("aiInferenceAdaptiveGroups", [])
+            if accounts else []
+        )
+
+        used = (
+            groups[0].get("sum", {}).get("totalNeurons", 0)
+            if groups else 0
+        )
+
+        used = int(round(float(used or 0)))
+        remaining = max(0, 10000 - used)
+
+        if used <= 10000:
+            usage_text = (
+                f"使用量：約 {used:,} / 10,000 neurons\n"
+                f"無料枠の残り：約 {remaining:,} neurons"
+            )
+        else:
+            usage_text = (
+                f"使用量：約 {used:,} neurons\n"
+                f"無料枠超過分：約 {used - 10000:,} neurons"
+            )
+
+        footer = (
+            "\n\n**Cloudflare Workers AI（本日・UTC）**\n"
+            f"{usage_text}\n"
+            "※ Cloudflare Analyticsによる推定値です。"
+        )
+        return message_text + footer
+
+    except Exception as error:
+        print(f"Workers AI使用量の取得に失敗しました: {type(error).__name__}")
+        return (
+            message_text
+            + "\n\n【Workers AI 使用量】取得できませんでした"
+        )
 
 # Discord設定
 intents = discord.Intents.default()
@@ -86,13 +190,13 @@ async def ask(interaction: discord.Interaction, question: str):
 
     if memos is None:
         await interaction.followup.send(
-            "メモの検索に失敗しました。"
+            await add_usage_footer("メモの検索に失敗しました。")
         )
         return
 
     if not memos:
         await interaction.followup.send(
-            "該当するメモは見つかりませんでした。"
+            await add_usage_footer("該当するメモは見つかりませんでした。")
         )
         return
 
@@ -108,8 +212,10 @@ async def ask(interaction: discord.Interaction, question: str):
     # AIの回答生成に失敗した場合
     if answer_result is None:
         await interaction.followup.send(
-            f"メモを {len(memos)} 件取得しましたが、"
-            "回答の生成に失敗しました。"
+            await add_usage_footer(
+                f"メモを {len(memos)} 件取得しましたが、"
+                "回答の生成に失敗しました。"
+            )
         )
         return
 
@@ -133,7 +239,7 @@ async def ask(interaction: discord.Interaction, question: str):
             + "\n".join(used_memo_ids)
         )
 
-    await interaction.followup.send(response_text)
+    await interaction.followup.send(await add_usage_footer(response_text))
 
 @client.event
 async def on_ready():
@@ -165,12 +271,12 @@ async def save_to_gas(message):
                 if result.get("success"):
                     if result.get("duplicated"):
                         await message.reply(
-                            "このメッセージは既に保存されています。"
+                            await add_usage_footer("このメッセージは既に保存されています。")
                         )
                         print("既に保存済みのメッセージです。")
 
                     else:
-                        await message.reply("メモを保存しました。")
+                        await message.reply(await add_usage_footer("メモを保存しました。"))
 
                         print("--------------------------------")
                         print("GASへの保存に成功しました。")
