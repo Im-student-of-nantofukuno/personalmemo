@@ -53,7 +53,7 @@ async def add_usage_footer(message_text):
     today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     query = """
-    query($accountTag: string!, $day: date!) {
+    query($accountTag: string!, $day: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           aiInferenceAdaptiveGroups(
