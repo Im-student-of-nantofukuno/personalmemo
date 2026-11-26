@@ -57,18 +57,30 @@ def record_neurons_from_response(response, result):
     print(f"Bot側のNeurons記録: +{neurons:.2f}（本日累計 {state['neurons']:.2f}）")
 
 
-def get_tracked_neurons_today():
-    """本日（UTC）にBotが受け取ったNeurons累計を返す。"""
+def get_combined_neurons(analytics_used):
+    """Analytics実測値とBot側記録を統合し、集計遅延中の表示を補う。"""
     today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     with USAGE_LOCK:
         try:
             state = json.loads(USAGE_FILE.read_text(encoding="utf-8"))
-            if state.get("date_utc") != today_utc:
-                return 0
-            return int(round(float(state.get("neurons", 0))))
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            return 0
+        except (OSError, json.JSONDecodeError):
+            state = {}
+
+        if state.get("date_utc") != today_utc:
+            state = {"date_utc": today_utc, "neurons": 0}
+
+        tracked = float(state.get("neurons", 0))
+        if "analytics_baseline" not in state:
+            state["analytics_baseline"] = max(0, float(analytics_used) - tracked)
+
+        local_estimate = state["analytics_baseline"] + tracked
+        combined = max(float(analytics_used), local_estimate)
+
+        temp_file = USAGE_FILE.with_suffix(".tmp")
+        temp_file.write_text(json.dumps(state), encoding="utf-8")
+        temp_file.replace(USAGE_FILE)
+        return int(round(combined))
 
 
 load_dotenv(Path(__file__).with_name(".env"))
