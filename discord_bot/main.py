@@ -14,7 +14,7 @@ from test_cloudflare_ai import (
     generate_embedding,
     EMBEDDING_MODEL_ID,
     EMBEDDING_DIMENSIONS,
-    get_tracked_neurons_today
+    get_combined_neurons
 )
 # 環境変数を読み込む
 load_dotenv()
@@ -132,8 +132,7 @@ async def add_usage_footer(message_text):
 
         # Analyticsの集計遅延を補うため、Bot自身が応答から記録した累計と比較する。
         analytics_used = int(round(float(used or 0)))
-        bot_tracked_used = get_tracked_neurons_today()
-        used = max(analytics_used, bot_tracked_used)
+        used = get_combined_neurons(analytics_used)
         remaining = max(0, 10000 - used)
 
         if used <= 10000:
