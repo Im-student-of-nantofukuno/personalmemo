@@ -1,4 +1,5 @@
 import math
+import json
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
@@ -88,13 +89,29 @@ async def add_usage_footer(message_text):
                     "Content-Type": "application/json"
                 }
             ) as response:
+                response_text = await response.text()
+
                 if response.status != 200:
+                    print("Workers AI使用量APIのHTTPエラー:")
+                    print(f"HTTPステータス: {response.status}")
+                    print(f"応答: {response_text[:1500]}")
                     raise RuntimeError(f"HTTP {response.status}")
 
-                result = await response.json(content_type=None)
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    print("Workers AI使用量APIの応答がJSONではありません:")
+                    print(response_text[:1500])
+                    raise
 
         if result.get("errors"):
-            raise RuntimeError("Analytics API returned errors")
+            print("Cloudflare GraphQLのエラー詳細:")
+            for item in result["errors"]:
+                print(item.get("message", str(item))[:1000])
+            raise RuntimeError("GraphQL query failed")
+
+        if not os.getenv("CLOUDFLARE_ACCOUNT_ID"):
+            raise RuntimeError("CLOUDFLARE_ACCOUNT_ID is not configured")
 
         accounts = (
             result.get("data", {})
@@ -134,7 +151,7 @@ async def add_usage_footer(message_text):
         return message_text + footer
 
     except Exception as error:
-        print(f"Workers AI使用量の取得に失敗しました: {type(error).__name__}")
+        print(f"Workers AI使用量の取得に失敗しました: {type(error).__name__}: {error}")
         return (
             message_text
             + "\n\n【Workers AI 使用量】取得できませんでした"
