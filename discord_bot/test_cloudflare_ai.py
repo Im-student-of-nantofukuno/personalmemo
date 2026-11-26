@@ -1,10 +1,11 @@
 
 import json
 import os
+import threading
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -13,6 +14,62 @@ from dotenv import load_dotenv
 # ==================================================
 # 設定
 # ==================================================
+
+# ==================================================
+# Workers AI 使用量の記録
+# ==================================================
+
+USAGE_FILE = Path(__file__).with_name("workers_ai_usage.json")
+USAGE_LOCK = threading.Lock()
+
+
+def record_neurons_from_response(response, result):
+    """応答ヘッダー等からリクエスト単位のNeuronsを取得して永続保存する。"""
+    raw_neurons = response.headers.get("cf-ai-neurons")
+
+    if raw_neurons is None and isinstance(result, dict):
+        raw_neurons = result.get("result", {}).get("usage", {}).get("neurons")
+
+    try:
+        neurons = float(raw_neurons)
+        if neurons < 0:
+            return
+    except (TypeError, ValueError):
+        print("このAI応答にはNeurons情報がありませんでした。")
+        return
+
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with USAGE_LOCK:
+        try:
+            state = json.loads(USAGE_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            state = {}
+
+        if state.get("date_utc") != today_utc:
+            state = {"date_utc": today_utc, "neurons": 0}
+
+        state["neurons"] = float(state.get("neurons", 0)) + neurons
+        temp_file = USAGE_FILE.with_suffix(".tmp")
+        temp_file.write_text(json.dumps(state), encoding="utf-8")
+        temp_file.replace(USAGE_FILE)
+
+    print(f"Bot側のNeurons記録: +{neurons:.2f}（本日累計 {state['neurons']:.2f}）")
+
+
+def get_tracked_neurons_today():
+    """本日（UTC）にBotが受け取ったNeurons累計を返す。"""
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with USAGE_LOCK:
+        try:
+            state = json.loads(USAGE_FILE.read_text(encoding="utf-8"))
+            if state.get("date_utc") != today_utc:
+                return 0
+            return int(round(float(state.get("neurons", 0))))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return 0
+
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -97,6 +154,7 @@ def generate_embedding(text, input_type="document"):
             result = json.loads(
                 response.read().decode("utf-8")
             )
+            record_neurons_from_response(response, result)
 
         if not result.get("success"):
             print("Embedding生成に失敗しました。")
@@ -383,6 +441,7 @@ def extract_dates(text, message_datetime):
             result = json.loads(
                 response.read().decode("utf-8")
             )
+            record_neurons_from_response(response, result)
 
         if not result.get("success"):
             print("AIからエラーが返されました。")
@@ -777,6 +836,7 @@ def generate_memo_answer(question, memos):
             result = json.loads(
                 response.read().decode("utf-8")
             )
+            record_neurons_from_response(response, result)
 
         if not result.get("success"):
             print("回答生成AIからエラーが返されました。")
