@@ -3,7 +3,7 @@
 #include <ArduinoWebsockets.h>
 
 using namespace websockets;
-const char* WIFI_SSID = "Buffalo-2G-3180";
+const char* WIFI_SSID = "SSID";
 const char* WIFI_PASSWORD = "password";
 
 WebsocketsClient client;
