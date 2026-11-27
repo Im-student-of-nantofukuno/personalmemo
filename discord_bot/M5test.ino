@@ -4,7 +4,7 @@
 
 using namespace websockets;
 const char* WIFI_SSID = "Buffalo-2G-3180";
-const char* WIFI_PASSWORD = "tx4uv87k5bcvm";
+const char* WIFI_PASSWORD = "password";
 
 WebsocketsClient client;
 
